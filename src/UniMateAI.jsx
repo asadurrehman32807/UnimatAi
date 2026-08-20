@@ -3,10 +3,11 @@ import {
   Home, Calendar, Bot, TrendingUp, User, Plus, Check, Clock, BookOpen,
   Award, Flame, Settings, X, ChevronRight, Sparkles, Send, FileText,
   Brain, Target, GraduationCap, Trash2, Loader2, ListChecks, Sun, Moon,
-  Mail, Lock, LogOut, CloudOff, Cloud,
+  Mail, Lock, LogOut, CloudOff, Cloud, Video, Star, Eye, Pencil,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  LineChart, Line, Legend, Cell,
 } from "recharts";
 import {
   getToken, getStoredUser, clearSession, signup, login, fetchRemoteData, saveRemoteData,
@@ -63,20 +64,23 @@ async function askClaude(prompt, { json = false, system } = {}) {
 /* ------------------------------------------------------------------ */
 /* Seed state                                                          */
 /* ------------------------------------------------------------------ */
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
 const seedState = () => {
   const subjects = [
-    { id: "s1", name: "Data Structures", color: SUBJECT_COLORS[0] },
-    { id: "s2", name: "Mathematics", color: SUBJECT_COLORS[1] },
-    { id: "s3", name: "Artificial Intelligence", color: SUBJECT_COLORS[2] },
-    { id: "s4", name: "Technical Writing", color: SUBJECT_COLORS[3] },
+    { id: "s1", name: "Data Structures", teacher: "Dr. Farooq", color: SUBJECT_COLORS[0], targetRating: 90, rating: 78, liveStreamEnabled: false, studySessions: [], ratingHistory: [{ date: todayISO(), rating: 78 }] },
+    { id: "s2", name: "Mathematics", teacher: "Ms. Hina", color: SUBJECT_COLORS[1], targetRating: 85, rating: 70, liveStreamEnabled: false, studySessions: [], ratingHistory: [{ date: todayISO(), rating: 70 }] },
+    { id: "s3", name: "Artificial Intelligence", teacher: "Dr. Ahmed", color: SUBJECT_COLORS[2], targetRating: 95, rating: 82, liveStreamEnabled: true, studySessions: [], ratingHistory: [{ date: todayISO(), rating: 82 }] },
+    { id: "s4", name: "Technical Writing", teacher: "", color: SUBJECT_COLORS[3], targetRating: 80, rating: 74, liveStreamEnabled: false, studySessions: [], ratingHistory: [{ date: todayISO(), rating: 74 }] },
   ];
   return {
     onboarded: false,
     profile: { name: "", university: "", program: "", semester: "", goal: "" },
     subjects,
     timetable: [
-      { id: uid(), subject: "s1", day: todayDay(), start: "09:00", end: "10:00", room: "CS-Lab 2" },
-      { id: uid(), subject: "s2", day: todayDay(), start: "10:30", end: "11:30", room: "Room 204" },
+      { id: uid(), subject: "s1", day: todayDay(), start: "09:00", end: "10:00", room: "CS-Lab 2", liveStreamEnabled: false },
+      { id: uid(), subject: "s2", day: todayDay(), start: "10:30", end: "11:30", room: "Room 204", liveStreamEnabled: false },
+      { id: uid(), subject: "s3", day: todayDay(), start: "13:00", end: "14:30", room: "Room 101", liveStreamEnabled: true },
     ],
     tasks: [
       { id: uid(), title: "Revise AI lecture notes", subject: "s3", priority: "Medium", due: todayStr(), done: false },
@@ -190,6 +194,50 @@ const EmptyState = ({ icon: Icon, title, subtitle }) => (
   </div>
 );
 
+const Modal = ({ title, onClose, children, width = 380 }) => (
+  <div
+    onClick={onClose}
+    style={{
+      position: "fixed", inset: 0, background: "rgba(6,8,20,0.7)", zIndex: 1000,
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+    }}
+  >
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        width: "100%", maxWidth: width, maxHeight: "85vh", overflowY: "auto",
+        background: T.surface, border: `1px solid ${T.border}`, borderRadius: 20, padding: 20,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <h3 style={{ color: T.text, fontFamily: T.display, fontSize: 17, fontWeight: 700 }}>{title}</h3>
+        <button onClick={onClose} style={{ background: "none", border: "none" }}>
+          <X size={20} color={T.textMuted} />
+        </button>
+      </div>
+      {children}
+    </div>
+  </div>
+);
+
+const ProgressBar = ({ value, max = 100, color }) => (
+  <div style={{ width: "100%", height: 8, borderRadius: 999, background: T.bgSoft, overflow: "hidden" }}>
+    <div
+      style={{
+        width: `${Math.min(100, Math.round((value / (max || 100)) * 100))}%`,
+        height: "100%", background: color || T.accent, borderRadius: 999, transition: "width 0.3s ease",
+      }}
+    />
+  </div>
+);
+
+const LiveBadge = () => (
+  <div style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(240,101,75,0.15)", padding: "3px 9px", borderRadius: 999 }}>
+    <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.red }} />
+    <span style={{ color: T.red, fontSize: 10.5, fontWeight: 700, letterSpacing: 0.3 }}>LIVE</span>
+  </div>
+);
+
 /* ------------------------------------------------------------------ */
 /* Onboarding                                                          */
 /* ------------------------------------------------------------------ */
@@ -269,6 +317,240 @@ function AuthScreen({ onAuthed }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* Subject modals — add/edit, rating, study session, details           */
+/* ------------------------------------------------------------------ */
+function SubjectFormModal({ initial, onClose, onSave }) {
+  const [name, setName] = useState(initial?.name || "");
+  const [teacher, setTeacher] = useState(initial?.teacher || "");
+  const [color, setColor] = useState(initial?.color || SUBJECT_COLORS[0]);
+  const [targetRating, setTargetRating] = useState(initial?.targetRating ?? 85);
+
+  const save = () => {
+    if (!name.trim()) return;
+    onSave({
+      id: initial?.id || uid(),
+      name: name.trim(),
+      teacher: teacher.trim(),
+      color,
+      targetRating: Number(targetRating) || 0,
+      rating: initial?.rating ?? 0,
+      liveStreamEnabled: initial?.liveStreamEnabled || false,
+      studySessions: initial?.studySessions || [],
+      ratingHistory: initial?.ratingHistory || [],
+    });
+    onClose();
+  };
+
+  return (
+    <Modal title={initial ? "Edit subject" : "Add subject"} onClose={onClose}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div>
+          <label style={{ color: T.textMuted, fontSize: 12, fontWeight: 600 }}>Subject name</label>
+          <input style={{ ...inputStyle, marginTop: 6 }} placeholder="e.g. Physics" value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div>
+          <label style={{ color: T.textMuted, fontSize: 12, fontWeight: 600 }}>Teacher (optional)</label>
+          <input style={{ ...inputStyle, marginTop: 6 }} placeholder="e.g. Mr. Ali" value={teacher} onChange={(e) => setTeacher(e.target.value)} />
+        </div>
+        <div>
+          <label style={{ color: T.textMuted, fontSize: 12, fontWeight: 600 }}>Color tag</label>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            {SUBJECT_COLORS.map((c) => (
+              <button
+                key={c}
+                onClick={() => setColor(c)}
+                aria-label={`Choose color ${c}`}
+                style={{ width: 26, height: 26, borderRadius: "50%", background: c, border: color === c ? `2px solid ${T.text}` : "2px solid transparent", cursor: "pointer" }}
+              />
+            ))}
+          </div>
+        </div>
+        <div>
+          <label style={{ color: T.textMuted, fontSize: 12, fontWeight: 600 }}>Target rating/score ({targetRating})</label>
+          <input
+            type="range" min={0} max={100} value={targetRating}
+            onChange={(e) => setTargetRating(e.target.value)}
+            style={{ width: "100%", marginTop: 8, accentColor: color }}
+          />
+        </div>
+        <Btn style={{ width: "100%", marginTop: 6 }} onClick={save} disabled={!name.trim()}>
+          {initial ? "Save changes" : "Add subject"}
+        </Btn>
+      </div>
+    </Modal>
+  );
+}
+
+function RatingModal({ subject, onClose, onSave }) {
+  const [rating, setRating] = useState(subject.rating || 0);
+  return (
+    <Modal title={`Update rating — ${subject.name}`} onClose={onClose}>
+      <div style={{ textAlign: "center", marginBottom: 16 }}>
+        <div style={{ fontFamily: T.display, fontSize: 40, fontWeight: 700, color: subject.color }}>{rating}</div>
+        <div style={{ color: T.textMuted, fontSize: 12 }}>out of 100 · target {subject.targetRating}</div>
+      </div>
+      <input
+        type="range" min={0} max={100} value={rating}
+        onChange={(e) => setRating(Number(e.target.value))}
+        style={{ width: "100%", accentColor: subject.color }}
+      />
+      <Btn
+        style={{ width: "100%", marginTop: 18 }}
+        onClick={() => { onSave(rating); onClose(); }}
+      >
+        Save rating
+      </Btn>
+    </Modal>
+  );
+}
+
+function StudySessionModal({ subject, onClose, onSave }) {
+  const [minutes, setMinutes] = useState(30);
+  const [date, setDate] = useState(todayISO());
+  const [note, setNote] = useState("");
+  return (
+    <Modal title={`Add study session — ${subject.name}`} onClose={onClose}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div>
+          <label style={{ color: T.textMuted, fontSize: 12, fontWeight: 600 }}>Date</label>
+          <input type="date" style={{ ...inputStyle, marginTop: 6 }} value={date} onChange={(e) => setDate(e.target.value)} />
+        </div>
+        <div>
+          <label style={{ color: T.textMuted, fontSize: 12, fontWeight: 600 }}>Minutes studied</label>
+          <input type="number" min={5} style={{ ...inputStyle, marginTop: 6 }} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} />
+        </div>
+        <div>
+          <label style={{ color: T.textMuted, fontSize: 12, fontWeight: 600 }}>Note (optional)</label>
+          <input style={{ ...inputStyle, marginTop: 6 }} placeholder="What did you cover?" value={note} onChange={(e) => setNote(e.target.value)} />
+        </div>
+        <Btn
+          style={{ width: "100%", marginTop: 6 }}
+          onClick={() => { onSave({ id: uid(), date, minutes: Number(minutes) || 0, note }); onClose(); }}
+          disabled={!minutes}
+        >
+          Save session
+        </Btn>
+      </div>
+    </Modal>
+  );
+}
+
+function SubjectDetailsModal({ subject, onClose }) {
+  const totalMinutes = (subject.studySessions || []).reduce((sum, s) => sum + (s.minutes || 0), 0);
+  return (
+    <Modal title={subject.name} onClose={onClose}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+        <div style={{ width: 12, height: 12, borderRadius: "50%", background: subject.color }} />
+        <span style={{ color: T.textMuted, fontSize: 13 }}>{subject.teacher || "No teacher set"}</span>
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+          <span style={{ color: T.textMuted, fontSize: 12.5 }}>Rating</span>
+          <span style={{ color: T.text, fontSize: 12.5, fontWeight: 700 }}>{subject.rating} / {subject.targetRating}</span>
+        </div>
+        <ProgressBar value={subject.rating} max={subject.targetRating} color={subject.color} />
+      </div>
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+        <Card style={{ flex: 1, textAlign: "center", padding: 12 }}>
+          <div style={{ color: T.text, fontFamily: T.display, fontSize: 20, fontWeight: 700 }}>{(subject.studySessions || []).length}</div>
+          <div style={{ color: T.textMuted, fontSize: 11 }}>Study sessions</div>
+        </Card>
+        <Card style={{ flex: 1, textAlign: "center", padding: 12 }}>
+          <div style={{ color: T.text, fontFamily: T.display, fontSize: 20, fontWeight: 700 }}>{Math.round(totalMinutes / 60)}h</div>
+          <div style={{ color: T.textMuted, fontSize: 11 }}>Total study time</div>
+        </Card>
+      </div>
+
+      <div style={{ color: T.text, fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Recent sessions</div>
+      {(subject.studySessions || []).length === 0 ? (
+        <div style={{ color: T.textMuted, fontSize: 12.5 }}>No study sessions logged yet.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {[...subject.studySessions].reverse().slice(0, 6).map((s) => (
+            <div key={s.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, borderBottom: `1px solid ${T.border}`, paddingBottom: 6 }}>
+              <span style={{ color: T.textMuted }}>{s.date}{s.note ? ` · ${s.note}` : ""}</span>
+              <span style={{ color: T.text, fontWeight: 600 }}>{s.minutes}m</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function ClassFormModal({ subjects, onClose, onSave }) {
+  const [subject, setSubject] = useState(subjects[0]?.id || "");
+  const [day, setDay] = useState(todayDay());
+  const [start, setStart] = useState("09:00");
+  const [end, setEnd] = useState("10:00");
+  const [room, setRoom] = useState("");
+  const [liveStreamEnabled, setLiveStreamEnabled] = useState(false);
+
+  return (
+    <Modal title="Add class" onClose={onClose}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div>
+          <label style={{ color: T.textMuted, fontSize: 12, fontWeight: 600 }}>Subject</label>
+          <select style={{ ...inputStyle, marginTop: 6 }} value={subject} onChange={(e) => setSubject(e.target.value)}>
+            {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{ color: T.textMuted, fontSize: 12, fontWeight: 600 }}>Day</label>
+          <select style={{ ...inputStyle, marginTop: 6 }} value={day} onChange={(e) => setDay(e.target.value)}>
+            {DAYS.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ color: T.textMuted, fontSize: 12, fontWeight: 600 }}>Start</label>
+            <input type="time" style={{ ...inputStyle, marginTop: 6 }} value={start} onChange={(e) => setStart(e.target.value)} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={{ color: T.textMuted, fontSize: 12, fontWeight: 600 }}>End</label>
+            <input type="time" style={{ ...inputStyle, marginTop: 6 }} value={end} onChange={(e) => setEnd(e.target.value)} />
+          </div>
+        </div>
+        <div>
+          <label style={{ color: T.textMuted, fontSize: 12, fontWeight: 600 }}>Room / Lab</label>
+          <input style={{ ...inputStyle, marginTop: 6 }} placeholder="e.g. Room 204" value={room} onChange={(e) => setRoom(e.target.value)} />
+        </div>
+        <button
+          onClick={() => setLiveStreamEnabled((v) => !v)}
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px",
+            borderRadius: 12, border: `1px solid ${T.border}`, background: T.bgSoft, cursor: "pointer",
+          }}
+        >
+          <span style={{ display: "flex", alignItems: "center", gap: 8, color: T.text, fontSize: 13, fontWeight: 600 }}>
+            <Video size={16} color={T.textMuted} /> Use live streaming
+          </span>
+          <span style={{
+            width: 38, height: 22, borderRadius: 999, background: liveStreamEnabled ? T.accent : T.border,
+            position: "relative", transition: "background 0.2s",
+          }}>
+            <span style={{
+              position: "absolute", top: 2, left: liveStreamEnabled ? 18 : 2, width: 18, height: 18, borderRadius: "50%",
+              background: "#fff", transition: "left 0.2s",
+            }} />
+          </span>
+        </button>
+        <Btn
+          style={{ width: "100%", marginTop: 6 }}
+          disabled={!subject || !room.trim()}
+          onClick={() => { onSave({ id: uid(), subject, day, start, end, room: room.trim(), liveStreamEnabled }); onClose(); }}
+        >
+          Add class
+        </Btn>
+      </div>
+    </Modal>
   );
 }
 
@@ -355,7 +637,10 @@ function HomeView({ state, actions, setTab }) {
                 <Card key={c.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: 14 }}>
                   <div style={{ width: 4, height: 34, borderRadius: 4, background: subj?.color }} />
                   <div style={{ flex: 1 }}>
-                    <div style={{ color: T.text, fontWeight: 700, fontSize: 14 }}>{subj?.name}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ color: T.text, fontWeight: 700, fontSize: 14 }}>{subj?.name}</div>
+                      {c.liveStreamEnabled && <LiveBadge />}
+                    </div>
                     <div style={{ color: T.textMuted, fontSize: 12 }}>{c.room}</div>
                   </div>
                   <div style={{ color: T.textMuted, fontSize: 12, fontWeight: 600 }}>{c.start} – {c.end}</div>
@@ -415,6 +700,13 @@ function HomeView({ state, actions, setTab }) {
 function PlannerView({ state, actions }) {
   const [sub, setSub] = useState("tasks");
   const [newTitle, setNewTitle] = useState("");
+  const [showAddSubject, setShowAddSubject] = useState(false);
+  const [editSubject, setEditSubject] = useState(null);
+  const [ratingSubject, setRatingSubject] = useState(null);
+  const [studySubject, setStudySubject] = useState(null);
+  const [detailsSubject, setDetailsSubject] = useState(null);
+  const [showAddClass, setShowAddClass] = useState(false);
+  const [dayFilter, setDayFilter] = useState(todayDay());
   const subjectOf = (id) => state.subjects.find((s) => s.id === id);
 
   const addTask = () => {
@@ -425,10 +717,11 @@ function PlannerView({ state, actions }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", gap: 8 }}>
+      <div style={{ display: "flex", gap: 8, overflowX: "auto" }}>
         <Pill active={sub === "tasks"} onClick={() => setSub("tasks")}>Tasks</Pill>
         <Pill active={sub === "assignments"} onClick={() => setSub("assignments")}>Assignments</Pill>
         <Pill active={sub === "timetable"} onClick={() => setSub("timetable")}>Timetable</Pill>
+        <Pill active={sub === "subjects"} onClick={() => setSub("subjects")}>Subjects</Pill>
       </div>
 
       {sub === "tasks" && (
@@ -491,30 +784,145 @@ function PlannerView({ state, actions }) {
 
       {sub === "timetable" && (
         <>
-          {DAYS.map((day) => {
-            const classes = state.timetable.filter((c) => c.day === day);
-            if (!classes.length) return null;
+          <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
+            {DAYS.map((day) => (
+              <Pill key={day} active={dayFilter === day} onClick={() => setDayFilter(day)}>{day}</Pill>
+            ))}
+          </div>
+
+          <Btn variant="ghost" onClick={() => setShowAddClass(true)} style={{ width: "100%" }}>
+            <Plus size={16} /> Add class
+          </Btn>
+
+          {(() => {
+            const classes = state.timetable.filter((c) => c.day === dayFilter);
+            if (!classes.length) {
+              return <Card><EmptyState icon={Calendar} title="No classes" subtitle={`Nothing scheduled for ${dayFilter} yet.`} /></Card>;
+            }
             return (
-              <div key={day}>
-                <div style={{ color: T.textMuted, fontSize: 12, fontWeight: 700, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>{day}</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
-                  {classes.map((c) => {
-                    const subj = subjectOf(c.subject);
-                    return (
-                      <Card key={c.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: 14 }}>
-                        <div style={{ width: 4, height: 34, borderRadius: 4, background: subj?.color }} />
-                        <div style={{ flex: 1 }}>
-                          <div style={{ color: T.text, fontWeight: 700, fontSize: 14 }}>{subj?.name}</div>
-                          <div style={{ color: T.textMuted, fontSize: 12 }}>{c.room}</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {classes.map((c) => {
+                  const subj = subjectOf(c.subject);
+                  return (
+                    <Card key={c.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: 14 }}>
+                      <div style={{ width: 4, height: 34, borderRadius: 4, background: subj?.color || T.border, flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <div style={{ color: T.text, fontWeight: 700, fontSize: 14 }}>{subj?.name || "Unknown subject"}</div>
+                          {c.liveStreamEnabled && <LiveBadge />}
                         </div>
-                        <div style={{ color: T.textMuted, fontSize: 12, fontWeight: 600 }}>{c.start} – {c.end}</div>
-                      </Card>
-                    );
-                  })}
-                </div>
+                        <div style={{ color: T.textMuted, fontSize: 12 }}>{c.room} · {c.start} – {c.end}</div>
+                      </div>
+                      <button
+                        onClick={() => actions.toggleClassLiveStream(c.id)}
+                        title="Use live streaming"
+                        style={{
+                          width: 34, height: 34, borderRadius: 10, flexShrink: 0, border: `1px solid ${c.liveStreamEnabled ? T.red : T.border}`,
+                          background: c.liveStreamEnabled ? "rgba(240,101,75,0.15)" : "transparent",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                        }}
+                      >
+                        <Video size={16} color={c.liveStreamEnabled ? T.red : T.textMuted} />
+                      </button>
+                      <button onClick={() => actions.removeClass(c.id)} style={{ background: "none", border: "none" }}>
+                        <Trash2 size={15} color={T.textMuted} />
+                      </button>
+                    </Card>
+                  );
+                })}
               </div>
             );
-          })}
+          })()}
+
+          {showAddClass && (
+            <ClassFormModal subjects={state.subjects} onClose={() => setShowAddClass(false)} onSave={actions.addClass} />
+          )}
+        </>
+      )}
+
+      {sub === "subjects" && (
+        <>
+          <Btn onClick={() => setShowAddSubject(true)} style={{ width: "100%" }}>
+            <Plus size={16} /> Add Subject
+          </Btn>
+
+          {state.subjects.length === 0 ? (
+            <Card><EmptyState icon={GraduationCap} title="No subjects yet" subtitle="Add your first subject above." /></Card>
+          ) : (
+            state.subjects.map((s) => (
+              <Card key={s.id}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                  <div style={{ width: 10, height: 10, borderRadius: "50%", background: s.color, flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: T.text, fontWeight: 700, fontSize: 14 }}>{s.name}</div>
+                    {s.teacher && <div style={{ color: T.textMuted, fontSize: 12 }}>{s.teacher}</div>}
+                  </div>
+                  {s.liveStreamEnabled && <LiveBadge />}
+                  <button onClick={() => setEditSubject(s)} style={{ background: "none", border: "none" }}>
+                    <Pencil size={14} color={T.textMuted} />
+                  </button>
+                  <button onClick={() => actions.removeSubject(s.id)} style={{ background: "none", border: "none" }}>
+                    <Trash2 size={15} color={T.textMuted} />
+                  </button>
+                </div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                    <span style={{ color: T.textMuted, fontSize: 11.5 }}>Rating progress</span>
+                    <span style={{ color: T.text, fontSize: 11.5, fontWeight: 700 }}>{s.rating} / {s.targetRating}</span>
+                  </div>
+                  <ProgressBar value={s.rating} max={s.targetRating} color={s.color} />
+                </div>
+
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <button
+                    onClick={() => actions.toggleSubjectLiveStream(s.id)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 5, padding: "7px 10px", borderRadius: 999,
+                      border: `1px solid ${s.liveStreamEnabled ? T.red : T.border}`, background: s.liveStreamEnabled ? "rgba(240,101,75,0.12)" : "transparent",
+                      color: s.liveStreamEnabled ? T.red : T.textMuted, fontSize: 11.5, fontWeight: 600,
+                    }}
+                  >
+                    <Video size={13} /> Live streaming
+                  </button>
+                  <button
+                    onClick={() => setRatingSubject(s)}
+                    style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 10px", borderRadius: 999, border: `1px solid ${T.border}`, background: "transparent", color: T.textMuted, fontSize: 11.5, fontWeight: 600 }}
+                  >
+                    <Star size={13} /> Update rating
+                  </button>
+                  <button
+                    onClick={() => setStudySubject(s)}
+                    style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 10px", borderRadius: 999, border: `1px solid ${T.border}`, background: "transparent", color: T.textMuted, fontSize: 11.5, fontWeight: 600 }}
+                  >
+                    <BookOpen size={13} /> Add study session
+                  </button>
+                  <button
+                    onClick={() => setDetailsSubject(s)}
+                    style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 10px", borderRadius: 999, border: `1px solid ${T.border}`, background: "transparent", color: T.textMuted, fontSize: 11.5, fontWeight: 600 }}
+                  >
+                    <Eye size={13} /> View details
+                  </button>
+                </div>
+              </Card>
+            ))
+          )}
+
+          {showAddSubject && (
+            <SubjectFormModal onClose={() => setShowAddSubject(false)} onSave={actions.addSubject} />
+          )}
+          {editSubject && (
+            <SubjectFormModal initial={editSubject} onClose={() => setEditSubject(null)} onSave={actions.updateSubject} />
+          )}
+          {ratingSubject && (
+            <RatingModal subject={ratingSubject} onClose={() => setRatingSubject(null)} onSave={(r) => actions.updateSubjectRating(ratingSubject.id, r)} />
+          )}
+          {studySubject && (
+            <StudySessionModal subject={studySubject} onClose={() => setStudySubject(null)} onSave={(session) => actions.addStudySession(studySubject.id, session)} />
+          )}
+          {detailsSubject && (
+            <SubjectDetailsModal subject={state.subjects.find((s) => s.id === detailsSubject.id) || detailsSubject} onClose={() => setDetailsSubject(null)} />
+          )}
         </>
       )}
     </div>
@@ -596,14 +1004,84 @@ function ChatView({ state, actions }) {
 /* ------------------------------------------------------------------ */
 /* Progress                                                             */
 /* ------------------------------------------------------------------ */
+function buildRatingTrendData(subjects) {
+  const dateSet = new Set();
+  subjects.forEach((s) => (s.ratingHistory || []).forEach((h) => dateSet.add(h.date)));
+  const dates = [...dateSet].sort();
+  return dates.map((date) => {
+    const row = { date: date.slice(5) };
+    subjects.forEach((s) => {
+      const hit = (s.ratingHistory || []).find((h) => h.date === date);
+      if (hit) row[s.id] = hit.rating;
+    });
+    return row;
+  });
+}
+
 function ProgressView({ state }) {
   const attendanceData = state.subjects.map((s) => {
     const a = state.attendance[s.id] || { total: 0, attended: 0 };
     return { name: s.name.split(" ")[0], pct: a.total ? Math.round((a.attended / a.total) * 100) : 0 };
   });
 
+  const ratingData = state.subjects.map((s) => ({ name: s.name.split(" ")[0], rating: s.rating || 0, color: s.color }));
+  const trendData = buildRatingTrendData(state.subjects);
+  const overallPerformance = state.subjects.length
+    ? Math.round(state.subjects.reduce((sum, s) => sum + (s.rating || 0), 0) / state.subjects.length)
+    : 0;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", gap: 12 }}>
+        <Card style={{ flex: 1, textAlign: "center" }}>
+          <div style={{ color: T.text, fontFamily: T.display, fontSize: 26, fontWeight: 700 }}>{overallPerformance}%</div>
+          <div style={{ color: T.textMuted, fontSize: 11.5 }}>Overall performance</div>
+        </Card>
+        <Card style={{ flex: 1, textAlign: "center" }}>
+          <div style={{ color: T.text, fontFamily: T.display, fontSize: 26, fontWeight: 700 }}>{state.xp}</div>
+          <div style={{ color: T.textMuted, fontSize: 11.5 }}>XP earned</div>
+        </Card>
+      </div>
+
+      <Card>
+        <h3 style={{ color: T.text, fontFamily: T.display, fontSize: 15, marginBottom: 12 }}>Subject-wise rating comparison</h3>
+        <div style={{ width: "100%", height: 180 }}>
+          <ResponsiveContainer>
+            <BarChart data={ratingData}>
+              <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
+              <XAxis dataKey="name" stroke={T.textMuted} fontSize={11} />
+              <YAxis stroke={T.textMuted} fontSize={11} domain={[0, 100]} />
+              <Tooltip contentStyle={{ background: T.bgSoft, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text }} />
+              <Bar dataKey="rating" radius={[6, 6, 0, 0]}>
+                {ratingData.map((d, i) => <Cell key={i} fill={d.color} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </Card>
+
+      <Card>
+        <h3 style={{ color: T.text, fontFamily: T.display, fontSize: 15, marginBottom: 4 }}>Performance trend</h3>
+        <p style={{ color: T.textMuted, fontSize: 11.5, marginBottom: 12 }}>Rating updates over time, per subject</p>
+        {trendData.length < 2 ? (
+          <div style={{ color: T.textMuted, fontSize: 12.5, padding: "16px 0" }}>Update a subject's rating a few times to see the trend build up here.</div>
+        ) : (
+          <div style={{ width: "100%", height: 200 }}>
+            <ResponsiveContainer>
+              <LineChart data={trendData}>
+                <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
+                <XAxis dataKey="date" stroke={T.textMuted} fontSize={11} />
+                <YAxis stroke={T.textMuted} fontSize={11} domain={[0, 100]} />
+                <Tooltip contentStyle={{ background: T.bgSoft, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text }} />
+                {state.subjects.map((s) => (
+                  <Line key={s.id} type="monotone" dataKey={s.id} name={s.name} stroke={s.color} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </Card>
+
       <Card>
         <h3 style={{ color: T.text, fontFamily: T.display, fontSize: 15, marginBottom: 12 }}>Attendance by subject</h3>
         <div style={{ width: "100%", height: 180 }}>
@@ -647,7 +1125,7 @@ function ProgressView({ state }) {
 /* ------------------------------------------------------------------ */
 /* Profile                                                              */
 /* ------------------------------------------------------------------ */
-function ProfileView({ state, actions, user, syncStatus }) {
+function ProfileView({ state, actions, user, syncStatus, setTab }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <Card style={{ textAlign: "center", padding: 24 }}>
@@ -687,6 +1165,15 @@ function ProfileView({ state, actions, user, syncStatus }) {
         <div style={{ color: T.textMuted, fontSize: 13, marginTop: 6 }}>{state.profile.goal || "No goal set yet."}</div>
       </Card>
 
+      <Card onClick={() => setTab && setTab("planner")} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 12 }}>
+        <BookOpen size={18} color={T.accent} />
+        <div style={{ flex: 1 }}>
+          <div style={{ color: T.text, fontWeight: 700, fontSize: 14 }}>Manage subjects</div>
+          <div style={{ color: T.textMuted, fontSize: 12 }}>{state.subjects.length} subject{state.subjects.length === 1 ? "" : "s"} · ratings, streaming, study sessions</div>
+        </div>
+        <ChevronRight size={18} color={T.textMuted} />
+      </Card>
+
       <Card onClick={actions.resetApp} style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 12 }}>
         <Settings size={18} color={T.textMuted} />
         <span style={{ color: T.text, fontSize: 14, fontWeight: 600 }}>Reset app data</span>
@@ -714,6 +1201,48 @@ function AppShell({ state, setState, user, syncStatus, logout }) {
         xp: s.xp + (s.tasks.find((t) => t.id === id)?.done ? -10 : 10),
       })),
     addTask: (task) => setState((s) => ({ ...s, tasks: [task, ...s.tasks] })),
+    addSubject: (subject) => setState((s) => ({ ...s, subjects: [...s.subjects, subject] })),
+    updateSubject: (updated) =>
+      setState((s) => ({ ...s, subjects: s.subjects.map((sub) => (sub.id === updated.id ? { ...sub, ...updated } : sub)) })),
+    updateSubjectRating: (id, rating) =>
+      setState((s) => ({
+        ...s,
+        subjects: s.subjects.map((sub) =>
+          sub.id === id
+            ? { ...sub, rating, ratingHistory: [...(sub.ratingHistory || []), { date: todayISO(), rating }] }
+            : sub
+        ),
+      })),
+    addStudySession: (subjectId, session) =>
+      setState((s) => ({
+        ...s,
+        xp: s.xp + 5,
+        subjects: s.subjects.map((sub) =>
+          sub.id === subjectId ? { ...sub, studySessions: [...(sub.studySessions || []), session] } : sub
+        ),
+      })),
+    toggleSubjectLiveStream: (id) =>
+      setState((s) => {
+        const target = s.subjects.find((sub) => sub.id === id);
+        const nextVal = !target?.liveStreamEnabled;
+        return {
+          ...s,
+          subjects: s.subjects.map((sub) => (sub.id === id ? { ...sub, liveStreamEnabled: nextVal } : sub)),
+          timetable: s.timetable.map((c) => (c.subject === id ? { ...c, liveStreamEnabled: nextVal } : c)),
+        };
+      }),
+    addClass: (entry) => setState((s) => ({ ...s, timetable: [...s.timetable, entry] })),
+    removeClass: (id) => setState((s) => ({ ...s, timetable: s.timetable.filter((c) => c.id !== id) })),
+    toggleClassLiveStream: (id) =>
+      setState((s) => ({ ...s, timetable: s.timetable.map((c) => (c.id === id ? { ...c, liveStreamEnabled: !c.liveStreamEnabled } : c)) })),
+    removeSubject: (id) =>
+      setState((s) => ({
+        ...s,
+        subjects: s.subjects.filter((sub) => sub.id !== id),
+        tasks: s.tasks.map((t) => (t.subject === id ? { ...t, subject: null } : t)),
+        assignments: s.assignments.map((a) => (a.subject === id ? { ...a, subject: null } : a)),
+        timetable: s.timetable.filter((c) => c.subject !== id),
+      })),
     removeTask: (id) => setState((s) => ({ ...s, tasks: s.tasks.filter((t) => t.id !== id) })),
     addChatMessage: (msg) => setState((s) => ({ ...s, chatMessages: [...s.chatMessages, msg] })),
     resetApp: () => {
@@ -748,7 +1277,7 @@ function AppShell({ state, setState, user, syncStatus, logout }) {
     planner: <PlannerView state={state} actions={actions} />,
     chat: <ChatView state={state} actions={actions} />,
     progress: <ProgressView state={state} />,
-    profile: <ProfileView state={state} actions={actions} user={user} syncStatus={syncStatus} />,
+    profile: <ProfileView state={state} actions={actions} user={user} syncStatus={syncStatus} setTab={setTab} />,
   };
 
   return (
